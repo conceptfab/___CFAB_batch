@@ -24,10 +24,8 @@ def setup_logger(name: str) -> logging.Logger:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
 
-        # Format logów
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+        # Format logów - tylko sama wiadomość, bez prefixów
+        formatter = logging.Formatter("%(message)s")
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
 

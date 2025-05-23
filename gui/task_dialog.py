@@ -250,39 +250,31 @@ class TaskDialog(QDialog):
         self.image_output_btn.clicked.connect(self.browse_image_output)
         self.multipass_output_btn.clicked.connect(self.browse_multipass_output)
         self.log_file_btn.clicked.connect(self.browse_log_file)
-        self.ok_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
         self.use_file_settings.stateChanged.connect(self.on_use_file_settings_changed)
 
-        # Połączenia do aktualizacji podglądu polecenia
-        for widget in [
-            self.name_edit,
-            self.c4d_file_edit,
-            self.c4d_version_combo,
-            self.frames_edit,
-            self.image_output_edit,
-            self.multipass_output_edit,
-            self.threads_spin,
-            self.use_gpu,
-            self.no_gui,
-            self.batch_mode,
-            self.shutdown,
-            self.quit,
-            self.debug_mode,
-            self.show_console,
-            self.log_file_edit,
-            self.verbose,
-            self.memory_limit,
-            self.priority_combo,
-        ]:
-            if isinstance(widget, QLineEdit):
-                widget.textChanged.connect(self.update_command_preview)
-            elif isinstance(widget, QComboBox):
-                widget.currentTextChanged.connect(self.update_command_preview)
-            elif isinstance(widget, QSpinBox):
-                widget.valueChanged.connect(self.update_command_preview)
-            elif isinstance(widget, QCheckBox):
-                widget.stateChanged.connect(self.update_command_preview)
+        # Połączenia dla przycisków OK i Cancel
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+        # Połączenia dla aktualizacji podglądu
+        self.name_edit.textChanged.connect(self.update_command_preview)
+        self.c4d_file_edit.textChanged.connect(self.update_command_preview)
+        self.c4d_version_combo.currentTextChanged.connect(self.update_command_preview)
+        self.frames_edit.textChanged.connect(self.update_command_preview)
+        self.image_output_edit.textChanged.connect(self.update_command_preview)
+        self.multipass_output_edit.textChanged.connect(self.update_command_preview)
+        self.threads_spin.valueChanged.connect(self.update_command_preview)
+        self.use_gpu.stateChanged.connect(self.update_command_preview)
+        self.no_gui.stateChanged.connect(self.update_command_preview)
+        self.batch_mode.stateChanged.connect(self.update_command_preview)
+        self.shutdown.stateChanged.connect(self.update_command_preview)
+        self.quit.stateChanged.connect(self.update_command_preview)
+        self.debug_mode.stateChanged.connect(self.update_command_preview)
+        self.show_console.stateChanged.connect(self.update_command_preview)
+        self.log_file_edit.textChanged.connect(self.update_command_preview)
+        self.verbose.stateChanged.connect(self.update_command_preview)
+        self.memory_limit.valueChanged.connect(self.update_command_preview)
+        self.priority_combo.currentTextChanged.connect(self.update_command_preview)
 
     def apply_styles(self):
         """Aplikuje style do przycisków"""
@@ -389,13 +381,57 @@ class TaskDialog(QDialog):
         self.command_preview.setText(" ".join(command_parts))
 
     def get_task(self) -> RenderTask:
-        """Tworzy i zwraca nowe zadanie na podstawie danych z formularza"""
-        return RenderTask(
+        """Tworzy i zwraca nowe zadanie renderowania"""
+        # Walidacja wymaganych pól
+        if not self.name_edit.text().strip():
+            raise ValueError("Nazwa zadania jest wymagana")
+        if not self.c4d_file_edit.text().strip():
+            raise ValueError("Plik C4D jest wymagany")
+        # Jeśli NIE jest zaznaczone 'Użyj ustawień plików', wymagaj ścieżki wyjściowej
+        if not self.use_file_settings.isChecked():
+            if not self.image_output_edit.text().strip():
+                raise ValueError("Ścieżka wyjściowa obrazów jest wymagana")
+
+        # Parsowanie zakresu klatek
+        frames = self.frames_edit.text().strip()
+        start_frame = None
+        end_frame = None
+        if frames:
+            if "-" in frames:
+                start_frame, end_frame = map(int, frames.split("-"))
+            else:
+                start_frame = end_frame = int(frames)
+
+        # Przygotowanie ustawień renderowania
+        render_settings = {
+            "threads": self.threads_spin.value(),
+            "use_gpu": self.use_gpu.isChecked(),
+            "no_gui": self.no_gui.isChecked(),
+            "batch_mode": self.batch_mode.isChecked(),
+            "shutdown": self.shutdown.isChecked(),
+            "quit": self.quit.isChecked(),
+            "debug_mode": self.debug_mode.isChecked(),
+            "show_console": self.show_console.isChecked(),
+            "log_file": self.log_file_edit.text().strip(),
+            "verbose": self.verbose.isChecked(),
+            "memory_limit": self.memory_limit.value(),
+            "priority": self.priority_combo.currentText(),
+        }
+
+        # Tworzenie zadania
+        task = RenderTask(
             id=str(uuid.uuid4()),
-            name=self.name_edit.text(),
-            c4d_file_path=self.c4d_file_edit.text(),
-            output_folder=self.image_output_edit.text(),
+            name=self.name_edit.text().strip(),
+            c4d_file_path=self.c4d_file_edit.text().strip(),
+            output_folder=(
+                self.image_output_edit.text().strip()
+                if not self.use_file_settings.isChecked()
+                else ""
+            ),
             cinema4d_version=self.c4d_version_combo.currentText(),
-            start_frame=self.frames_edit.text().split(",")[0].split("-")[0],
-            end_frame=self.frames_edit.text().split(",")[0].split("-")[1],
+            start_frame=start_frame,
+            end_frame=end_frame,
+            render_settings=render_settings,
         )
+
+        return task

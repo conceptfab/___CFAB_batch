@@ -44,13 +44,18 @@ cmd-safe                                  # tryb bezpieczny (bez wtyczek)
 -script "ścieżka/do/skryptu.py"       # wykonaj skrypt Python
 Przykłady praktycznego użycia
 Renderowanie wsadowe
-cmdCinema4D.exe -render "C:\Projects\moj_projekt.c4d" -frame 1-100 -oimage "C:\Render\Output" -nogui -shutdown
+Cinema4D.exe -render "C:\Projects\moj_projekt.c4d" -frame 1-100 -oimage "C:\Render\Output" 
+
+
+
+
+
 Renderowanie konkretnej klatki
-cmdCinema4D.exe -render "projekt.c4d" -frame 50 -threads 16 -quit
+Cinema4D.exe -render "projekt.c4d" -frame 50 -threads 16 -quit
 Uruchomienie z własną konfiguracją
-cmdCinema4D.exe -prefs "C:\MyPrefs" -language pl -layout "My_Layout"
+Cinema4D.exe -prefs "C:\MyPrefs" -language pl -layout "My_Layout"
 Team Render Client
-cmdCinema4D.exe -teamrender -server "192.168.1.10" -nogui
+Cinema4D.exe -teamrender -server "192.168.1.10" -nogui
 Tryb debugowania
 cmdCinema4D.exe -debug -console -log "C:\debug.log" -verbose
 Zmienne środowiskowe
@@ -102,3 +107,9 @@ cmd-debug                                 # tryb debugowania
 Parametry pamięci i wydajności
 cmd-memory 4096                           # limit pamięci w MB
 -priority high 
+
+
+"C:\software\MAXON\Cinema 4D 2023_DEV\Commandline.exe" -render "C:\_cloud\Untitled 1.c4d" -verbose -console
+
+
+  "status": "pending",

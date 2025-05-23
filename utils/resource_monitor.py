@@ -16,7 +16,7 @@ class ResourceMonitor:
             disk_path = os.path.abspath(os.sep)  # '/' na Linux, 'C:\' na Windows
 
             return {
-                "cpu": psutil.cpu_percent(interval=1),
+                "cpu": psutil.cpu_percent(interval=0),
                 "memory": psutil.virtual_memory().percent,
                 "disk": psutil.disk_usage(disk_path).percent,
             }
