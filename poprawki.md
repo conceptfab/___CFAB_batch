@@ -1,534 +1,479 @@
-Analiza założeń i architektura rozwiązania
-Główne komponenty systemu:
-
-GUI (PyQt6) - interfejs użytkownika
-Queue Manager - zarządzanie kolejką zadań
-Cinema 4D Controller - komunikacja z C4D przez CLI
-Task Manager - wykonywanie zadań
-Logger - system logowania
-File Monitor - monitorowanie plików
-Resource Monitor - kontrola zasobów systemowych
-Email Reporter - wysyłanie raportów
-
-Struktura plików projektu
-cinema4d_batch_renderer/
-├── main.py
-├── gui/
-│   ├── __init__.py
-│   ├── main_window.py
-│   ├── task_dialog.py
-│   └── widgets/
-├── core/
-│   ├── __init__.py
-│   ├── queue_manager.py
-│   ├── task_manager.py
-│   ├── cinema4d_controller.py
-│   └── config.py
-├── utils/
-│   ├── __init__.py
-│   ├── logger.py
-│   ├── file_monitor.py
-│   ├── resource_monitor.py
-│   └── email_reporter.py
-├── models/
-│   ├── __init__.py
-│   └── task.py
-└── resources/
-    └── icons/
-Zmiany w kodzie
-Plik: main.py
-Opis: Główny punkt wejścia aplikacji
-pythonimport sys
-from PyQt6.QtWidgets import QApplication
-from gui.main_window import MainWindow
-
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("Cinema 4D Batch Renderer")
-    
-    window = MainWindow()
-    window.show()
-    
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
-Plik: models/task.py
-Opis: Model danych dla zadania renderingu
-pythonfrom dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-from enum import Enum
-from datetime import datetime
-
-class TaskStatus(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-@dataclass
-class RenderTask:
-    id: str
-    name: str
-    c4d_file_path: str
-    output_folder: str
-    cinema4d_version: str
-    status: TaskStatus = TaskStatus.PENDING
-    start_frame: Optional[int] = None
-    end_frame: Optional[int] = None
-    render_settings: Dict[str, Any] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.now)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
-    output_files: list = field(default_factory=list)
-    
-    @property
-    def duration(self) -> Optional[float]:
-        if self.started_at and self.completed_at:
-            return (self.completed_at - self.started_at).total_seconds()
-        return None
-Plik: core/cinema4d_controller.py
-Opis: Kontroler do komunikacji z Cinema 4D przez CLI
-pythonimport subprocess
-import os
-import logging
-from pathlib import Path
-from typing import Optional, List, Dict
-from models.task import RenderTask
-
-class Cinema4DController:
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.c4d_installations = self._discover_c4d_installations()
-    
-    def _discover_c4d_installations(self) -> Dict[str, str]:
-        """Wykrywa zainstalowane wersje Cinema 4D"""
-        installations = {}
-        
-        # Windows paths
-        program_files = [
-            "C:/Program Files/Maxon Cinema 4D",
-            "C:/Program Files/MAXON/Cinema 4D"
-        ]
-        
-        for base_path in program_files:
-            if os.path.exists(base_path):
-                for item in os.listdir(base_path):
-                    version_path = os.path.join(base_path, item)
-                    exe_path = os.path.join(version_path, "Cinema 4D.exe")
-                    if os.path.exists(exe_path):
-                        installations[item] = exe_path
-        
-        return installations
-    
-    def validate_project(self, task: RenderTask) -> List[str]:
-        """Weryfikuje projekt pod kątem brakujących tekstur i pluginów"""
-        issues = []
-        
-        if not os.path.exists(task.c4d_file_path):
-            issues.append(f"Plik projektu nie istnieje: {task.c4d_file_path}")
-            return issues
-        
-        # Tutaj można dodać bardziej zaawansowaną walidację
-        # np. parsowanie pliku C4D w poszukiwaniu referencji do tekstur
-        
-        return issues
-    
-    def render_task(self, task: RenderTask) -> bool:
-        """Wykonuje renderowanie zadania"""
-        try:
-            c4d_exe = self.c4d_installations.get(task.cinema4d_version)
-            if not c4d_exe:
-                raise ValueError(f"Nie znaleziono wersji Cinema 4D: {task.cinema4d_version}")
-            
-            # Budowanie komendy CLI
-            cmd = [
-                c4d_exe,
-                "-nogui",
-                "-render",
-                task.c4d_file_path
-            ]
-            
-            # Dodanie parametrów renderingu
-            if task.start_frame is not None:
-                cmd.extend(["-frame", f"{task.start_frame}"])
-            if task.end_frame is not None:
-                cmd.extend(["-frame", f"{task.start_frame}-{task.end_frame}"])
-            
-            if task.output_folder:
-                cmd.extend(["-oimage", task.output_folder])
-            
-            # Wykonanie renderowania
-            self.logger.info(f"Rozpoczynam renderowanie: {' '.join(cmd)}")
-            
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            stdout, stderr = process.communicate()
-            
-            if process.returncode == 0:
-                self.logger.info(f"Renderowanie zakończone pomyślnie: {task.name}")
-                return True
-            else:
-                self.logger.error(f"Błąd renderowania: {stderr}")
-                task.error_message = stderr
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Wyjątek podczas renderowania: {str(e)}")
-            task.error_message = str(e)
-            return False
+Analiza kodu i proponowane ulepszenia
+Po przeanalizowaniu kodu aplikacji Cinema 4D Batch Renderer, identyfikuję kilka obszarów wymagających poprawy oraz możliwości wprowadzenia obsługi wielowątkowości.
+🔧 Krytyczne poprawki
 Plik: core/queue_manager.py
-Opis: Zarządca kolejki zadań renderingu
+Problem: Brak importu datetime
+python# Dodaj na początku pliku
+from datetime import datetime
+Plik: gui/main_window.py
+Problem: Błąd w sprawdzaniu wyniku dialogu
+python# W funkcji add_task() zmień:
+if dialog.exec() == dialog.accepted:  # ← Poprawne
+    task = dialog.get_task()
+    self.queue_manager.add_task(task)
+    self.update_tasks_table()
+Plik: utils/resource_monitor.py
+Problem: Błędna ścieżka dysku dla Windows
+pythondef get_system_resources(self) -> Dict[str, float]:
+    """Zwraca aktualny stan zasobów systemowych"""
+    try:
+        # Użyj głównego dysku systemowego
+        import os
+        disk_path = os.path.abspath(os.sep)  # '/' na Linux, 'C:\' na Windows
+        
+        return {
+            "cpu": psutil.cpu_percent(interval=1),
+            "memory": psutil.virtual_memory().percent,
+            "disk": psutil.disk_usage(disk_path).percent,
+        }
+    except Exception as e:
+        self.logger.error(f"Błąd odczytu zasobów systemowych: {str(e)}")
+        return {"cpu": 0, "memory": 0, "disk": 0}
+🚀 Wielowątkowość i współbieżność
+1. Nowy plik: core/thread_manager.py
 pythonimport threading
-import time
+import concurrent.futures
+import queue
 from typing import List, Optional, Callable
-from queue import Queue
+from dataclasses import dataclass
 from models.task import RenderTask, TaskStatus
 from core.cinema4d_controller import Cinema4DController
 from utils.logger import setup_logger
-import logging
+from utils.resource_monitor import ResourceMonitor
 
-class QueueManager:
-    def __init__(self):
-        self.task_queue = Queue()
-        self.tasks: List[RenderTask] = []
-        self.current_task: Optional[RenderTask] = None
-        self.is_processing = False
-        self.worker_thread: Optional[threading.Thread] = None
+
+@dataclass
+class RenderWorker:
+    """Worker do obsługi pojedynczego zadania renderingu"""
+    worker_id: int
+    is_busy: bool = False
+    current_task: Optional[RenderTask] = None
+
+
+class ThreadManager:
+    def __init__(self, max_workers: int = None):
+        self.logger = setup_logger("thread_manager")
+        self.resource_monitor = ResourceMonitor()
         self.c4d_controller = Cinema4DController()
-        self.logger = setup_logger("queue_manager")
+        
+        # Automatyczne określenie liczby workerów na podstawie zasobów
+        if max_workers is None:
+            max_workers = self.resource_monitor.get_optimal_thread_count()
+        
+        self.max_workers = max_workers
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self.task_queue = queue.PriorityQueue()
+        self.workers: List[RenderWorker] = [
+            RenderWorker(worker_id=i) for i in range(max_workers)
+        ]
+        
+        self.is_running = False
+        self.dispatcher_thread: Optional[threading.Thread] = None
         
         # Callbacks
-        self.on_task_started: Optional[Callable[[RenderTask], None]] = None
-        self.on_task_completed: Optional[Callable[[RenderTask], None]] = None
-        self.on_task_failed: Optional[Callable[[RenderTask], None]] = None
-    
-    def add_task(self, task: RenderTask):
-        """Dodaje zadanie do kolejki"""
-        self.tasks.append(task)
-        self.task_queue.put(task)
-        self.logger.info(f"Dodano zadanie do kolejki: {task.name}")
-    
-    def remove_task(self, task_id: str) -> bool:
-        """Usuwa zadanie z kolejki"""
-        for task in self.tasks:
-            if task.id == task_id and task.status == TaskStatus.PENDING:
-                self.tasks.remove(task)
-                # Trudno usunąć z Queue, więc oznaczamy jako anulowane
-                task.status = TaskStatus.CANCELLED
-                return True
-        return False
-    
-    def start_processing(self):
-        """Rozpoczyna przetwarzanie kolejki"""
-        if not self.is_processing:
-            self.is_processing = True
-            self.worker_thread = threading.Thread(target=self._process_queue)
-            self.worker_thread.daemon = True
-            self.worker_thread.start()
-            self.logger.info("Rozpoczęto przetwarzanie kolejki")
-    
-    def stop_processing(self):
-        """Zatrzymuje przetwarzanie kolejki"""
-        self.is_processing = False
-        if self.worker_thread:
-            self.worker_thread.join()
-        self.logger.info("Zatrzymano przetwarzanie kolejki")
-    
-    def _process_queue(self):
-        """Główna pętla przetwarzania kolejki"""
-        while self.is_processing:
+        self.on_task_started: Optional[Callable[[RenderTask, int], None]] = None
+        self.on_task_completed: Optional[Callable[[RenderTask, int], None]] = None
+        self.on_task_failed: Optional[Callable[[RenderTask, int], None]] = None
+        self.on_worker_status_changed: Optional[Callable[[RenderWorker], None]] = None
+
+    def start(self):
+        """Rozpoczyna menedżer wątków"""
+        if not self.is_running:
+            self.is_running = True
+            self.dispatcher_thread = threading.Thread(target=self._dispatch_tasks)
+            self.dispatcher_thread.daemon = True
+            self.dispatcher_thread.start()
+            self.logger.info(f"Uruchomiono menedżer wątków z {self.max_workers} workerami")
+
+    def stop(self):
+        """Zatrzymuje menedżer wątków"""
+        self.is_running = False
+        if self.dispatcher_thread:
+            self.dispatcher_thread.join()
+        self.executor.shutdown(wait=True)
+        self.logger.info("Zatrzymano menedżer wątków")
+
+    def add_task(self, task: RenderTask, priority: int = 1):
+        """Dodaje zadanie do kolejki z priorytetem (niższy = wyższy priorytet)"""
+        self.task_queue.put((priority, task))
+        self.logger.info(f"Dodano zadanie do kolejki: {task.name} (priorytet: {priority})")
+
+    def _dispatch_tasks(self):
+        """Główna pętla dyspozytora zadań"""
+        while self.is_running:
             try:
-                if not self.task_queue.empty():
-                    task = self.task_queue.get(timeout=1)
-                    
-                    if task.status == TaskStatus.CANCELLED:
+                # Sprawdź czy są dostępni workerzy i czy zasoby pozwalają na renderowanie
+                available_worker = self._get_available_worker()
+                if available_worker and self.resource_monitor.should_start_render():
+                    try:
+                        # Pobierz zadanie z kolejki (timeout 1 sekunda)
+                        priority, task = self.task_queue.get(timeout=1.0)
+                        
+                        # Przypisz zadanie do workera
+                        available_worker.is_busy = True
+                        available_worker.current_task = task
+                        
+                        if self.on_worker_status_changed:
+                            self.on_worker_status_changed(available_worker)
+                        
+                        # Uruchom zadanie w osobnym wątku
+                        future = self.executor.submit(
+                            self._execute_task, 
+                            task, 
+                            available_worker.worker_id
+                        )
+                        
+                        # Dodaj callback dla zakończenia zadania
+                        future.add_done_callback(
+                            lambda f, worker=available_worker: self._task_completed(f, worker)
+                        )
+                        
+                    except queue.Empty:
                         continue
-                    
-                    self._process_task(task)
                 else:
-                    time.sleep(0.1)
+                    # Brak dostępnych workerów lub zasobów, czekaj
+                    threading.Event().wait(0.5)
+                    
             except Exception as e:
-                self.logger.error(f"Błąd w pętli przetwarzania: {str(e)}")
-    
-    def _process_task(self, task: RenderTask):
-        """Przetwarza pojedyncze zadanie"""
-        self.current_task = task
+                self.logger.error(f"Błąd w dyspozytorze zadań: {str(e)}")
+
+    def _get_available_worker(self) -> Optional[RenderWorker]:
+        """Zwraca pierwszego dostępnego workera"""
+        for worker in self.workers:
+            if not worker.is_busy:
+                return worker
+        return None
+
+    def _execute_task(self, task: RenderTask, worker_id: int) -> bool:
+        """Wykonuje zadanie renderingu"""
+        from datetime import datetime
+        
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now()
         
         if self.on_task_started:
-            self.on_task_started(task)
+            self.on_task_started(task, worker_id)
         
-        self.logger.info(f"Rozpoczynam przetwarzanie zadania: {task.name}")
+        self.logger.info(f"Worker {worker_id}: Rozpoczynam zadanie {task.name}")
         
-        # Walidacja projektu
-        issues = self.c4d_controller.validate_project(task)
-        if issues:
-            task.status = TaskStatus.FAILED
-            task.error_message = "; ".join(issues)
-            task.completed_at = datetime.now()
-            
-            if self.on_task_failed:
-                self.on_task_failed(task)
-            return
-        
-        # Renderowanie
-        success = self.c4d_controller.render_task(task)
-        
-        task.completed_at = datetime.now()
-        
-        if success:
-            task.status = TaskStatus.COMPLETED
-            if self.on_task_completed:
-                self.on_task_completed(task)
-        else:
-            task.status = TaskStatus.FAILED
-            if self.on_task_failed:
-                self.on_task_failed(task)
-        
-        self.current_task = None
-Plik: gui/main_window.py
-Opis: Główne okno aplikacji
-pythonfrom PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QPushButton, QTableWidget, QTableWidgetItem,
-                             QProgressBar, QLabel, QTextEdit, QSplitter,
-                             QGroupBox, QGridLayout)
-from PyQt6.QtCore import QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon
-from core.queue_manager import QueueManager
-from gui.task_dialog import TaskDialog
-from models.task import RenderTask, TaskStatus
-from utils.resource_monitor import ResourceMonitor
-import logging
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.queue_manager = QueueManager()
-        self.resource_monitor = ResourceMonitor()
-        self.init_ui()
-        self.setup_connections()
-        self.setup_timer()
-        
-    def init_ui(self):
-        """Inicjalizuje interfejs użytkownika"""
-        self.setWindowTitle("Cinema 4D Batch Renderer")
-        self.setGeometry(100, 100, 1200, 800)
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Główny layout
-        main_layout = QVBoxLayout(central_widget)
-        
-        # Toolbar
-        toolbar_layout = QHBoxLayout()
-        self.add_task_btn = QPushButton("Dodaj zadanie")
-        self.remove_task_btn = QPushButton("Usuń zadanie")
-        self.start_queue_btn = QPushButton("Start kolejki")
-        self.stop_queue_btn = QPushButton("Stop kolejki")
-        
-        toolbar_layout.addWidget(self.add_task_btn)
-        toolbar_layout.addWidget(self.remove_task_btn)
-        toolbar_layout.addWidget(self.start_queue_btn)
-        toolbar_layout.addWidget(self.stop_queue_btn)
-        toolbar_layout.addStretch()
-        
-        main_layout.addLayout(toolbar_layout)
-        
-        # Splitter dla głównego obszaru
-        splitter = QSplitter()
-        main_layout.addWidget(splitter)
-        
-        # Tabela zadań
-        self.tasks_table = QTableWidget()
-        self.tasks_table.setColumnCount(6)
-        self.tasks_table.setHorizontalHeaderLabels([
-            "Nazwa", "Status", "Plik C4D", "Folder wyjściowy", 
-            "Wersja C4D", "Czas"
-        ])
-        splitter.addWidget(self.tasks_table)
-        
-        # Panel informacyjny
-        info_widget = QWidget()
-        info_layout = QVBoxLayout(info_widget)
-        
-        # Zasoby systemowe
-        resources_group = QGroupBox("Zasoby systemowe")
-        resources_layout = QGridLayout(resources_group)
-        
-        self.cpu_label = QLabel("CPU: 0%")
-        self.memory_label = QLabel("RAM: 0%")
-        self.disk_label = QLabel("Dysk: 0%")
-        
-        resources_layout.addWidget(self.cpu_label, 0, 0)
-        resources_layout.addWidget(self.memory_label, 0, 1)
-        resources_layout.addWidget(self.disk_label, 1, 0)
-        
-        info_layout.addWidget(resources_group)
-        
-        # Logi
-        logs_group = QGroupBox("Logi")
-        logs_layout = QVBoxLayout(logs_group)
-        self.log_text = QTextEdit()
-        self.log_text.setMaximumHeight(300)
-        logs_layout.addWidget(self.log_text)
-        info_layout.addWidget(logs_group)
-        
-        splitter.addWidget(info_widget)
-        splitter.setSizes([800, 400])
-        
-        # Status bar
-        self.statusBar().showMessage("Gotowy")
-    
-    def setup_connections(self):
-        """Konfiguruje połączenia sygnałów"""
-        self.add_task_btn.clicked.connect(self.add_task)
-        self.remove_task_btn.clicked.connect(self.remove_task)
-        self.start_queue_btn.clicked.connect(self.start_queue)
-        self.stop_queue_btn.clicked.connect(self.stop_queue)
-        
-        # Callbacks dla queue managera
-        self.queue_manager.on_task_started = self.on_task_started
-        self.queue_manager.on_task_completed = self.on_task_completed
-        self.queue_manager.on_task_failed = self.on_task_failed
-    
-    def setup_timer(self):
-        """Konfiguruje timer dla aktualizacji UI"""
-        self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self.update_ui)
-        self.update_timer.start(1000)  # Aktualizacja co sekundę
-    
-    def add_task(self):
-        """Otwiera dialog dodawania zadania"""
-        dialog = TaskDialog(self)
-        if dialog.exec() == dialog.Accepted:
-            task = dialog.get_task()
-            self.queue_manager.add_task(task)
-            self.update_tasks_table()
-    
-    def remove_task(self):
-        """Usuwa wybrane zadanie"""
-        current_row = self.tasks_table.currentRow()
-        if current_row >= 0:
-            task = self.queue_manager.tasks[current_row]
-            if self.queue_manager.remove_task(task.id):
-                self.update_tasks_table()
-    
-    def start_queue(self):
-        """Rozpoczyna przetwarzanie kolejki"""
-        self.queue_manager.start_processing()
-        self.start_queue_btn.setEnabled(False)
-        self.stop_queue_btn.setEnabled(True)
-        self.statusBar().showMessage("Przetwarzanie kolejki...")
-    
-    def stop_queue(self):
-        """Zatrzymuje przetwarzanie kolejki"""
-        self.queue_manager.stop_processing()
-        self.start_queue_btn.setEnabled(True)
-        self.stop_queue_btn.setEnabled(False)
-        self.statusBar().showMessage("Kolejka zatrzymana")
-    
-    def update_tasks_table(self):
-        """Aktualizuje tabelę zadań"""
-        self.tasks_table.setRowCount(len(self.queue_manager.tasks))
-        
-        for row, task in enumerate(self.queue_manager.tasks):
-            self.tasks_table.setItem(row, 0, QTableWidgetItem(task.name))
-            self.tasks_table.setItem(row, 1, QTableWidgetItem(task.status.value))
-            self.tasks_table.setItem(row, 2, QTableWidgetItem(task.c4d_file_path))
-            self.tasks_table.setItem(row, 3, QTableWidgetItem(task.output_folder))
-            self.tasks_table.setItem(row, 4, QTableWidgetItem(task.cinema4d_version))
-            
-            duration = ""
-            if task.duration:
-                duration = f"{task.duration:.1f}s"
-            self.tasks_table.setItem(row, 5, QTableWidgetItem(duration))
-    
-    def update_ui(self):
-        """Aktualizuje interfejs użytkownika"""
-        # Aktualizacja tabeli zadań
-        self.update_tasks_table()
-        
-        # Aktualizacja zasobów systemowych
-        resources = self.resource_monitor.get_system_resources()
-        self.cpu_label.setText(f"CPU: {resources['cpu']:.1f}%")
-        self.memory_label.setText(f"RAM: {resources['memory']:.1f}%")
-        self.disk_label.setText(f"Dysk: {resources['disk']:.1f}%")
-    
-    def on_task_started(self, task: RenderTask):
-        """Callback wywoływany przy rozpoczęciu zadania"""
-        self.log_text.append(f"[{task.started_at}] Rozpoczęto: {task.name}")
-    
-    def on_task_completed(self, task: RenderTask):
-        """Callback wywoływany przy zakończeniu zadania"""
-        self.log_text.append(f"[{task.completed_at}] Zakończono: {task.name} (czas: {task.duration:.1f}s)")
-    
-    def on_task_failed(self, task: RenderTask):
-        """Callback wywoływany przy błędzie zadania"""
-        self.log_text.append(f"[{task.completed_at}] Błąd: {task.name} - {task.error_message}")
-Plik: utils/resource_monitor.py
-Opis: Monitor zasobów systemowych dla optymalizacji renderingu
-pythonimport psutil
-import logging
-from typing import Dict
-
-class ResourceMonitor:
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-    
-    def get_system_resources(self) -> Dict[str, float]:
-        """Zwraca aktualny stan zasobów systemowych"""
         try:
-            return {
-                'cpu': psutil.cpu_percent(interval=1),
-                'memory': psutil.virtual_memory().percent,
-                'disk': psutil.disk_usage('/').percent
-            }
-        except Exception as e:
-            self.logger.error(f"Błąd odczytu zasobów systemowych: {str(e)}")
-            return {'cpu': 0, 'memory': 0, 'disk': 0}
-    
-    def should_start_render(self) -> bool:
-        """Określa czy system jest gotowy do rozpoczęcia renderingu"""
-        resources = self.get_system_resources()
-        
-        # Proste heurystyki - można rozbudować
-        if resources['cpu'] > 90:
-            return False
-        if resources['memory'] > 85:
-            return False
-        if resources['disk'] > 95:
-            return False
+            # Walidacja projektu
+            issues = self.c4d_controller.validate_project(task)
+            if issues:
+                task.status = TaskStatus.FAILED
+                task.error_message = "; ".join(issues)
+                return False
             
-        return True
-    
-    def get_optimal_thread_count(self) -> int:
-        """Zwraca optymalną liczbę wątków do renderingu"""
-        cpu_count = psutil.cpu_count(logical=False)
-        memory_gb = psutil.virtual_memory().total / (1024**3)
+            # Renderowanie
+            success = self.c4d_controller.render_task(task)
+            
+            if success:
+                task.status = TaskStatus.COMPLETED
+                return True
+            else:
+                task.status = TaskStatus.FAILED
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Worker {worker_id}: Błąd zadania {task.name}: {str(e)}")
+            task.status = TaskStatus.FAILED
+            task.error_message = str(e)
+            return False
+        finally:
+            task.completed_at = datetime.now()
+
+    def _task_completed(self, future: concurrent.futures.Future, worker: RenderWorker):
+        """Callback wywoływany po zakończeniu zadania"""
+        task = worker.current_task
+        success = False
         
-        # Prosty algorytm - można dostosować
-        if memory_gb < 8:
-            return max(1, cpu_count - 2)
-        elif memory_gb < 16:
-            return max(1, cpu_count - 1)
-        else:
-            return cpu_count
-Dodatkowe pliki potrzebne do implementacji:
+        try:
+            success = future.result()
+        except Exception as e:
+            self.logger.error(f"Błąd w zadaniu {task.name}: {str(e)}")
+            task.error_message = str(e)
+            task.status = TaskStatus.FAILED
+        
+        # Zwolnij workera
+        worker.is_busy = False
+        worker.current_task = None
+        
+        if self.on_worker_status_changed:
+            self.on_worker_status_changed(worker)
+        
+        # Wywołaj odpowiedni callback
+        if success and self.on_task_completed:
+            self.on_task_completed(task, worker.worker_id)
+        elif not success and self.on_task_failed:
+            self.on_task_failed(task, worker.worker_id)
 
-gui/task_dialog.py - Dialog dodawania/edycji zadań
-utils/logger.py - Konfiguracja systemu logowania
-utils/file_monitor.py - Monitorowanie plików wyjściowych
-utils/email_reporter.py - Wysyłanie raportów email
-requirements.txt - Lista wymaganych pakietów
+    def get_worker_status(self) -> List[RenderWorker]:
+        """Zwraca status wszystkich workerów"""
+        return self.workers.copy()
 
-Czy chciałbyś, żebym rozwinął któryś z tych modułów lub omówił szczegóły implementacji?
+    def cancel_task(self, task_id: str) -> bool:
+        """Anuluje zadanie (jeśli jeszcze nie zostało rozpoczęte)"""
+        # Trudne do implementacji w ThreadPoolExecutor
+        # Można rozważyć zmianę na własną implementację
+        self.logger.warning("Anulowanie zadań nie jest obecnie obsługiwane")
+        return False
+2. Zaktualizowany plik: core/queue_manager.py
+pythonimport threading
+import time
+from datetime import datetime
+from typing import Callable, List, Optional
+
+from core.thread_manager import ThreadManager
+from models.task import RenderTask, TaskStatus
+from utils.logger import setup_logger
+
+
+class QueueManager:
+    def __init__(self, max_workers: int = None):
+        self.tasks: List[RenderTask] = []
+        self.thread_manager = ThreadManager(max_workers)
+        self.logger = setup_logger("queue_manager")
+        self._lock = threading.Lock()  # Ochrona przed dostępem wielowątkowym
+
+        # Callbacks
+        self.on_task_started: Optional[Callable[[RenderTask], None]] = None
+        self.on_task_completed: Optional[Callable[[RenderTask], None]] = None
+        self.on_task_failed: Optional[Callable[[RenderTask], None]] = None
+        self.on_queue_status_changed: Optional[Callable[[], None]] = None
+
+        # Konfiguracja callbacków thread managera
+        self.thread_manager.on_task_started = self._on_task_started
+        self.thread_manager.on_task_completed = self._on_task_completed
+        self.thread_manager.on_task_failed = self._on_task_failed
+
+    def add_task(self, task: RenderTask, priority: int = 1):
+        """Dodaje zadanie do kolejki"""
+        with self._lock:
+            self.tasks.append(task)
+        
+        self.thread_manager.add_task(task, priority)
+        self.logger.info(f"Dodano zadanie do kolejki: {task.name}")
+        
+        if self.on_queue_status_changed:
+            self.on_queue_status_changed()
+
+    def remove_task(self, task_id: str) -> bool:
+        """Usuwa zadanie z kolejki (tylko jeśli status = PENDING)"""
+        with self._lock:
+            for task in self.tasks:
+                if task.id == task_id and task.status == TaskStatus.PENDING:
+                    task.status = TaskStatus.CANCELLED
+                    if self.on_queue_status_changed:
+                        self.on_queue_status_changed()
+                    return True
+        return False
+
+    def start_processing(self):
+        """Rozpoczyna przetwarzanie kolejki"""
+        self.thread_manager.start()
+        self.logger.info("Rozpoczęto przetwarzanie kolejki")
+
+    def stop_processing(self):
+        """Zatrzymuje przetwarzanie kolejki"""
+        self.thread_manager.stop()
+        self.logger.info("Zatrzymano przetwarzanie kolejki")
+
+    def get_tasks(self) -> List[RenderTask]:
+        """Zwraca kopię listy zadań (thread-safe)"""
+        with self._lock:
+            return self.tasks.copy()
+
+    def get_worker_status(self):
+        """Zwraca status workerów"""
+        return self.thread_manager.get_worker_status()
+
+    def _on_task_started(self, task: RenderTask, worker_id: int):
+        """Callback z thread managera - zadanie rozpoczęte"""
+        self.logger.info(f"Worker {worker_id}: Rozpoczęto zadanie {task.name}")
+        if self.on_task_started:
+            self.on_task_started(task)
+        if self.on_queue_status_changed:
+            self.on_queue_status_changed()
+
+    def _on_task_completed(self, task: RenderTask, worker_id: int):
+        """Callback z thread managera - zadanie zakończone"""
+        self.logger.info(f"Worker {worker_id}: Zakończono zadanie {task.name}")
+        if self.on_task_completed:
+            self.on_task_completed(task)
+        if self.on_queue_status_changed:
+            self.on_queue_status_changed()
+
+    def _on_task_failed(self, task: RenderTask, worker_id: int):
+        """Callback z thread managera - zadanie nieudane"""
+        self.logger.error(f"Worker {worker_id}: Błąd zadania {task.name}: {task.error_message}")
+        if self.on_task_failed:
+            self.on_task_failed(task)
+        if self.on_queue_status_changed:
+            self.on_queue_status_changed()
+🎨 Ulepszenia GUI
+Plik: gui/worker_status_widget.py
+pythonfrom PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.thread_manager import RenderWorker
+
+
+class WorkerStatusWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.workers = []
+        self.init_ui()
+
+    def init_ui(self):
+        """Inicjalizuje interfejs widżetu statusu workerów"""
+        layout = QVBoxLayout(self)
+        
+        self.workers_group = QGroupBox("Status workerów")
+        self.workers_group.setStyleSheet(
+            """
+            QGroupBox {
+                background-color: #252526;
+                border: 1px solid #3F3F46;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 16px;
+            }
+            QGroupBox::title {
+                color: #CCCCCC;
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+            }
+        """
+        )
+        
+        self.workers_layout = QVBoxLayout(self.workers_group)
+        layout.addWidget(self.workers_group)
+
+    def update_workers(self, workers: list[RenderWorker]):
+        """Aktualizuje wyświetlanie statusu workerów"""
+        # Usuń stare widżety
+        for i in reversed(range(self.workers_layout.count())):
+            child = self.workers_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+
+        # Dodaj nowe widżety dla każdego workera
+        for worker in workers:
+            worker_widget = QWidget()
+            worker_layout = QHBoxLayout(worker_widget)
+            
+            # Etykieta workera
+            worker_label = QLabel(f"Worker {worker.worker_id}:")
+            worker_layout.addWidget(worker_label)
+            
+            # Status
+            if worker.is_busy and worker.current_task:
+                status_label = QLabel(f"Renderuje: {worker.current_task.name}")
+                status_label.setStyleSheet("color: #10B981;")  # Zielony
+            else:
+                status_label = QLabel("Bezczynny")
+                status_label.setStyleSheet("color: #9CA3AF;")  # Szary
+            
+            worker_layout.addWidget(status_label)
+            worker_layout.addStretch()
+            
+            self.workers_layout.addWidget(worker_widget)
+Zaktualizowany plik: gui/main_window.py
+python# Dodaj import na początku
+from gui.worker_status_widget import WorkerStatusWidget
+
+# W metodzie init_ui(), po sekcji zasobów systemowych dodaj:
+# Status workerów
+self.worker_status_widget = WorkerStatusWidget()
+info_layout.addWidget(self.worker_status_widget)
+
+# W metodzie update_ui() dodaj:
+# Aktualizacja statusu workerów
+workers = self.queue_manager.get_worker_status()
+self.worker_status_widget.update_workers(workers)
+📁 Nowe funkcjonalności
+Plik: utils/file_monitor.py
+pythonimport os
+import time
+from pathlib import Path
+from typing import List, Optional
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+from models.task import RenderTask
+from utils.logger import setup_logger
+
+
+class RenderOutputHandler(FileSystemEventHandler):
+    """Handler monitorujący pliki wyjściowe renderingu"""
+    
+    def __init__(self, task: RenderTask, callback=None):
+        self.task = task
+        self.callback = callback
+        self.logger = setup_logger("file_monitor")
+        self.expected_files = set()
+        self.found_files = set()
+
+    def on_created(self, event):
+        """Wywoływane gdy zostanie utworzony nowy plik"""
+        if not event.is_directory:
+            file_path = Path(event.src_path)
+            
+            # Sprawdź czy to plik renderingu (np. .png, .jpg, .exr)
+            if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.exr', '.tiff', '.tga']:
+                self.found_files.add(str(file_path))
+                self.logger.info(f"Wykryto plik renderingu: {file_path}")
+                
+                if self.callback:
+                    self.callback(str(file_path))
+
+
+class FileMonitor:
+    def __init__(self):
+        self.observer = Observer()
+        self.logger = setup_logger("file_monitor")
+        self.active_monitors = {}
+
+    def start_monitoring(self, task: RenderTask, callback=None):
+        """Rozpoczyna monitorowanie folderu wyjściowego dla zadania"""
+        if not os.path.exists(task.output_folder):
+            os.makedirs(task.output_folder, exist_ok=True)
+        
+        handler = RenderOutputHandler(task, callback)
+        self.observer.schedule(handler, task.output_folder, recursive=False)
+        self.active_monitors[task.id] = handler
+        
+        if not self.observer.is_alive():
+            self.observer.start()
+            
+        self.logger.info(f"Rozpoczęto monitorowanie folderu: {task.output_folder}")
+
+    def stop_monitoring(self, task_id: str):
+        """Zatrzymuje monitorowanie dla konkretnego zadania"""
+        if task_id in self.active_monitors:
+            del self.active_monitors[task_id]
+
+    def stop_all(self):
+        """Zatrzymuje całkowicie obserwator plików"""
+        self.observer.stop()
+        self.observer.join()
+        self.active_monitors.clear()
+
+    def get_found_files(self, task_id: str) -> List[str]:
+        """Zwraca listę znalezionych plików dla zadania"""
+        if task_id in self.active_monitors:
+            return list(self.active_monitors[task_id].found_files)
+        return []
+Aktualizacja requirements.txt
+PyQt6>=6.4.0
+psutil>=5.9.0
+watchdog>=3.0.0
+Pillow>=9.0.0

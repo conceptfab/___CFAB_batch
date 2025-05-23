@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Dict
 
 import psutil
@@ -11,10 +12,13 @@ class ResourceMonitor:
     def get_system_resources(self) -> Dict[str, float]:
         """Zwraca aktualny stan zasobów systemowych"""
         try:
+            # Użyj głównego dysku systemowego
+            disk_path = os.path.abspath(os.sep)  # '/' na Linux, 'C:\' na Windows
+
             return {
                 "cpu": psutil.cpu_percent(interval=1),
                 "memory": psutil.virtual_memory().percent,
-                "disk": psutil.disk_usage("/").percent,
+                "disk": psutil.disk_usage(disk_path).percent,
             }
         except Exception as e:
             self.logger.error(f"Błąd odczytu zasobów systemowych: {str(e)}")
