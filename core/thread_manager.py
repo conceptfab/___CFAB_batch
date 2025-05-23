@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 from core.cinema4d_controller import Cinema4DController
+from core.config import Config
 from models.task import RenderTask, TaskStatus
 from utils.logger import setup_logger
 from utils.resource_monitor import ResourceMonitor
@@ -21,7 +22,9 @@ class RenderWorker:
 
 class ThreadManager:
     def __init__(self, max_workers: int = None):
-        self.logger = setup_logger("thread_manager")
+        self.config = Config()
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("thread_manager", log_to_file, log_file_path)
         self.resource_monitor = ResourceMonitor()
         self.c4d_controller = Cinema4DController()
 
@@ -190,3 +193,8 @@ class ThreadManager:
         # Można rozważyć zmianę na własną implementację
         self.logger.warning("Anulowanie zadań nie jest obecnie obsługiwane")
         return False
+
+    def reload_config(self):
+        """Przeładowuje konfigurację i aktualizuje logger"""
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("thread_manager", log_to_file, log_file_path)

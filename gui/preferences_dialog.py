@@ -1,6 +1,9 @@
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFileDialog,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,15 +25,20 @@ class PreferencesDialog(QDialog):
         self.init_ui()
         self.apply_styles()
         self.load_versions()
+        self.load_logging_settings()
 
     def init_ui(self):
         """Inicjalizuje interfejs użytkownika"""
         self.setWindowTitle("Preferencje")
         self.setMinimumWidth(600)
-        self.setMinimumHeight(400)
+        self.setMinimumHeight(500)
         self.setStyleSheet("background-color: #1E1E1E; color: #CCCCCC;")
 
         layout = QVBoxLayout(self)
+
+        # Sekcja wersji Cinema 4D
+        versions_group = QGroupBox("Wersje Cinema 4D")
+        versions_layout = QVBoxLayout(versions_group)
 
         # Tabela wersji
         self.versions_table = QTableWidget()
@@ -60,23 +68,43 @@ class PreferencesDialog(QDialog):
             }
         """
         )
-        layout.addWidget(self.versions_table)
+        versions_layout.addWidget(self.versions_table)
 
-        # Przyciski zarządzania
-        buttons_layout = QHBoxLayout()
-
+        # Przyciski zarządzania wersjami
+        versions_buttons_layout = QHBoxLayout()
         self.add_btn = QPushButton("Dodaj wersję")
         self.edit_btn = QPushButton("Edytuj")
         self.remove_btn = QPushButton("Usuń")
         self.browse_btn = QPushButton("Przeglądaj...")
 
-        buttons_layout.addWidget(self.add_btn)
-        buttons_layout.addWidget(self.edit_btn)
-        buttons_layout.addWidget(self.remove_btn)
-        buttons_layout.addWidget(self.browse_btn)
-        buttons_layout.addStretch()
+        versions_buttons_layout.addWidget(self.add_btn)
+        versions_buttons_layout.addWidget(self.edit_btn)
+        versions_buttons_layout.addWidget(self.remove_btn)
+        versions_buttons_layout.addWidget(self.browse_btn)
+        versions_buttons_layout.addStretch()
 
-        layout.addLayout(buttons_layout)
+        versions_layout.addLayout(versions_buttons_layout)
+        layout.addWidget(versions_group)
+
+        # Sekcja logowania
+        logging_group = QGroupBox("Ustawienia logowania")
+        logging_layout = QFormLayout(logging_group)
+
+        self.log_to_file_checkbox = QCheckBox("Zapisuj logi do pliku")
+        logging_layout.addRow("", self.log_to_file_checkbox)
+
+        # Ścieżka pliku logu
+        log_file_layout = QHBoxLayout()
+        self.log_file_edit = QLineEdit()
+        self.log_file_edit.setEnabled(False)  # Domyślnie wyłączone
+        self.log_file_browse_btn = QPushButton("Przeglądaj...")
+        self.log_file_browse_btn.setEnabled(False)  # Domyślnie wyłączone
+
+        log_file_layout.addWidget(self.log_file_edit)
+        log_file_layout.addWidget(self.log_file_browse_btn)
+        logging_layout.addRow("Plik logu:", log_file_layout)
+
+        layout.addWidget(logging_group)
 
         # Przyciski OK/Anuluj
         dialog_buttons = QHBoxLayout()
@@ -91,8 +119,34 @@ class PreferencesDialog(QDialog):
         self.edit_btn.clicked.connect(self.edit_version)
         self.remove_btn.clicked.connect(self.remove_version)
         self.browse_btn.clicked.connect(self.browse_executable)
+        self.log_to_file_checkbox.stateChanged.connect(self.on_log_to_file_changed)
+        self.log_file_browse_btn.clicked.connect(self.browse_log_file)
         self.ok_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
+
+    def on_log_to_file_changed(self, state):
+        """Obsługuje zmianę stanu checkboxa logowania do pliku"""
+        enabled = state == 2  # Qt.CheckState.Checked
+        self.log_file_edit.setEnabled(enabled)
+        self.log_file_browse_btn.setEnabled(enabled)
+
+    def browse_log_file(self):
+        """Otwiera dialog wyboru pliku logu"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Wybierz plik logu",
+            "logs/app.log",
+            "Log Files (*.log);;Text Files (*.txt);;All Files (*.*)",
+        )
+        if file_path:
+            self.log_file_edit.setText(file_path)
+
+    def load_logging_settings(self):
+        """Ładuje ustawienia logowania"""
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.log_to_file_checkbox.setChecked(log_to_file)
+        if log_file_path:
+            self.log_file_edit.setText(log_file_path)
 
     def apply_styles(self):
         """Aplikuje style do przycisków"""
@@ -100,6 +154,7 @@ class PreferencesDialog(QDialog):
         self.edit_btn.setStyleSheet(BUTTON_STYLES["default"])
         self.remove_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.browse_btn.setStyleSheet(BUTTON_STYLES["default"])
+        self.log_file_browse_btn.setStyleSheet(BUTTON_STYLES["default"])
         self.ok_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.cancel_button.setStyleSheet(BUTTON_STYLES["default"])
 
@@ -157,14 +212,23 @@ class PreferencesDialog(QDialog):
         """Zwraca słownik wersji Cinema 4D"""
         versions = {}
         for row in range(self.versions_table.rowCount()):
-            version = self.versions_table.item(row, 0).text()
-            path = self.versions_table.item(row, 1).text()
-            if version and path:
-                versions[version] = path
+            version_item = self.versions_table.item(row, 0)
+            path_item = self.versions_table.item(row, 1)
+            if version_item and path_item:
+                version = version_item.text()
+                path = path_item.text()
+                if version and path:
+                    versions[version] = path
         return versions
 
     def accept(self):
         """Zapisuje zmiany i zamyka okno"""
         versions = self.get_versions()
         self.config.set_c4d_versions(versions)
+
+        # Zapisz ustawienia logowania
+        log_to_file = self.log_to_file_checkbox.isChecked()
+        log_file_path = self.log_file_edit.text() if log_to_file else None
+        self.config.set_logging_settings(log_to_file, log_file_path)
+
         super().accept()

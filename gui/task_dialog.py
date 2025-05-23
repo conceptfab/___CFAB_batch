@@ -155,8 +155,8 @@ class TaskDialog(QDialog):
         performance_layout = QFormLayout()
 
         self.threads_spin = QSpinBox()
-        self.threads_spin.setRange(1, 64)
-        self.threads_spin.setValue(8)
+        self.threads_spin.setRange(0, 64)
+        self.threads_spin.setValue(0)
         performance_layout.addRow("Liczba wątków:", self.threads_spin)
 
         self.use_gpu = QCheckBox("Używaj GPU")
@@ -212,13 +212,13 @@ class TaskDialog(QDialog):
         memory_layout = QVBoxLayout(memory_tab)
 
         self.memory_limit = QSpinBox()
-        self.memory_limit.setRange(1024, 32768)
-        self.memory_limit.setValue(4096)
+        self.memory_limit.setRange(0, 32768)
+        self.memory_limit.setValue(0)
         self.memory_limit.setSingleStep(1024)
 
         self.priority_combo = QComboBox()
-        self.priority_combo.addItems(["low", "normal", "high"])
-        self.priority_combo.setCurrentText("high")
+        self.priority_combo.addItems(["", "low", "normal", "high"])
+        self.priority_combo.setCurrentText("")
 
         memory_layout.addWidget(QLabel("Limit pamięci (MB):"))
         memory_layout.addWidget(self.memory_limit)
@@ -336,6 +336,9 @@ class TaskDialog(QDialog):
         # Parametry renderowania
         if self.c4d_file_edit.text():
             command_parts.append(f'-render "{self.c4d_file_edit.text()}"')
+            # Dodaj wymagane parametry
+            command_parts.append("-verbose")
+            command_parts.append("-console")
 
         if not self.use_file_settings.isChecked():
             if self.frames_edit.text():
@@ -349,7 +352,9 @@ class TaskDialog(QDialog):
                     f'-omultipass "{self.multipass_output_edit.text()}"'
                 )
 
-            command_parts.append(f"-threads {self.threads_spin.value()}")
+            # Dodaj parametry tylko jeśli zostały wybrane
+            if self.threads_spin.value() > 0:
+                command_parts.append(f"-threads {self.threads_spin.value()}")
 
             if self.use_gpu.isChecked():
                 command_parts.append("-gpu")
@@ -375,8 +380,10 @@ class TaskDialog(QDialog):
                 command_parts.append("-verbose")
 
             # Parametry pamięci
-            command_parts.append(f"cmd-memory {self.memory_limit.value()}")
-            command_parts.append(f"-priority {self.priority_combo.currentText()}")
+            if self.memory_limit.value() > 0:
+                command_parts.append(f"cmd-memory {self.memory_limit.value()}")
+            if self.priority_combo.currentText():
+                command_parts.append(f"-priority {self.priority_combo.currentText()}")
 
         self.command_preview.setText(" ".join(command_parts))
 
@@ -402,21 +409,42 @@ class TaskDialog(QDialog):
             else:
                 start_frame = end_frame = int(frames)
 
-        # Przygotowanie ustawień renderowania
-        render_settings = {
-            "threads": self.threads_spin.value(),
-            "use_gpu": self.use_gpu.isChecked(),
-            "no_gui": self.no_gui.isChecked(),
-            "batch_mode": self.batch_mode.isChecked(),
-            "shutdown": self.shutdown.isChecked(),
-            "quit": self.quit.isChecked(),
-            "debug_mode": self.debug_mode.isChecked(),
-            "show_console": self.show_console.isChecked(),
-            "log_file": self.log_file_edit.text().strip(),
-            "verbose": self.verbose.isChecked(),
-            "memory_limit": self.memory_limit.value(),
-            "priority": self.priority_combo.currentText(),
-        }
+        # Przygotowanie ustawień renderowania - dodaj tylko te, które zostały wybrane
+        render_settings = {}
+
+        # Debugowanie - wyświetl wartości przed dodaniem
+        print("Wartości przed dodaniem do render_settings:")
+        print("threads_spin.value():", self.threads_spin.value())
+        print("memory_limit.value():", self.memory_limit.value())
+
+        # Dodaj tylko te parametry, które zostały wybrane przez użytkownika
+        if self.threads_spin.value() > 0:
+            render_settings["threads"] = self.threads_spin.value()
+        if self.use_gpu.isChecked():
+            render_settings["use_gpu"] = True
+        if self.no_gui.isChecked():
+            render_settings["no_gui"] = True
+        if self.batch_mode.isChecked():
+            render_settings["batch_mode"] = True
+        if self.shutdown.isChecked():
+            render_settings["shutdown"] = True
+        if self.quit.isChecked():
+            render_settings["quit"] = True
+        if self.debug_mode.isChecked():
+            render_settings["debug_mode"] = True
+        if self.show_console.isChecked():
+            render_settings["show_console"] = True
+        if self.log_file_edit.text().strip():
+            render_settings["log_file"] = self.log_file_edit.text().strip()
+        if self.verbose.isChecked():
+            render_settings["verbose"] = True
+        if self.memory_limit.value() > 0:
+            render_settings["memory_limit"] = self.memory_limit.value()
+        if self.priority_combo.currentText():
+            render_settings["priority"] = self.priority_combo.currentText()
+
+        # Debugowanie - wyświetl ustawienia
+        print("Render settings:", render_settings)
 
         # Tworzenie zadania
         task = RenderTask(

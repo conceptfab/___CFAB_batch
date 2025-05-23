@@ -1,3 +1,5 @@
+import logging
+
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
@@ -16,6 +18,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.cinema4d_controller import Cinema4DController
+from core.config import Config
 from core.queue_manager import QueueManager
 from gui.button_styles import BUTTON_STYLES
 from gui.preferences_dialog import PreferencesDialog
@@ -51,10 +55,11 @@ class ResourceMonitorThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.config = Config()
         self.queue_manager = QueueManager()
         self.resource_monitor = ResourceMonitor()
-        self.logger = setup_logger("main_window")
-        self.init_ui()
+        self.init_ui()  # Najpierw inicjalizujemy UI
+        self.setup_logging()  # Potem konfigurujemy logowanie
         self.setup_connections()
         self.setup_timers()
         self.setup_resource_monitoring()
@@ -63,6 +68,49 @@ class MainWindow(QMainWindow):
         # Wczytaj zadania z folderu tasks
         self.queue_manager.load_tasks()
         self.update_tasks_table()  # Aktualizuj widok po wczytaniu zadań
+
+    def setup_logging(self):
+        """Konfiguruje logowanie na podstawie ustawień"""
+        log_to_file, log_file_path = self.config.get_logging_settings()
+
+        # Tworzymy handler UI
+        class UILogHandler(logging.Handler):
+            def __init__(self, text_widget):
+                super().__init__()
+                self.text_widget = text_widget
+
+            def emit(self, record):
+                msg = self.format(record)
+                self.text_widget.append(msg)
+                # Przewiń do końca
+                self.text_widget.verticalScrollBar().setValue(
+                    self.text_widget.verticalScrollBar().maximum()
+                )
+
+        # Tworzymy formatter
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(message)s", datefmt="%H:%M:%S"
+        )
+
+        # Tworzymy handler UI
+        ui_handler = UILogHandler(self.log_text)
+        ui_handler.setFormatter(formatter)
+
+        # Konfigurujemy główny logger
+        self.logger = setup_logger("main_window", log_to_file, log_file_path)
+        self.logger.addHandler(ui_handler)
+
+        # Konfigurujemy logger queue_manager
+        self.queue_manager.logger = setup_logger(
+            "queue_manager", log_to_file, log_file_path
+        )
+        self.queue_manager.logger.addHandler(ui_handler)
+
+        # Konfigurujemy logger c4d_controller
+        self.queue_manager.c4d_controller.logger = setup_logger(
+            "cinema4d_controller", log_to_file, log_file_path
+        )
+        self.queue_manager.c4d_controller.logger.addHandler(ui_handler)
 
     def init_ui(self):
         """Inicjalizuje interfejs użytkownika"""
@@ -371,9 +419,12 @@ class MainWindow(QMainWindow):
     def show_preferences(self):
         """Otwiera okno preferencji"""
         dialog = PreferencesDialog(self)
-        if dialog.exec() == dialog.accepted:
-            # TODO: Zapisz zmiany w konfiguracji
-            pass
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Przeładuj konfigurację logowania
+            self.setup_logging()
+            # Przeładuj ustawienia w queue_manager
+            self.queue_manager.c4d_controller = Cinema4DController()
+            self.statusBar().showMessage("Ustawienia zostały zapisane")
 
     def edit_task(self):
         """Otwiera dialog edycji wybranego zadania (tylko PENDING)"""

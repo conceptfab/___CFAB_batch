@@ -6,6 +6,7 @@ from typing import List, Optional
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from core.config import Config
 from models.task import RenderTask
 from utils.logger import setup_logger
 
@@ -43,9 +44,16 @@ class RenderOutputHandler(FileSystemEventHandler):
 
 class FileMonitor:
     def __init__(self):
+        self.config = Config()
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("file_monitor", log_to_file, log_file_path)
         self.observer = Observer()
-        self.logger = setup_logger("file_monitor")
         self.active_monitors = {}
+
+    def reload_config(self):
+        """Przeładowuje konfigurację i aktualizuje logger"""
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("file_monitor", log_to_file, log_file_path)
 
     def start_monitoring(self, task: RenderTask, callback=None):
         """Rozpoczyna monitorowanie folderu wyjściowego dla zadania"""

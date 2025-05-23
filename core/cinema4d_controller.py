@@ -12,10 +12,18 @@ from utils.logger import setup_logger
 
 class Cinema4DController:
     def __init__(self):
-        self.logger = setup_logger("cinema4d_controller")
         self.config = Config()
         self.c4d_installations = self.config.get_c4d_versions()
         self.on_log_message: Optional[Callable[[str], None]] = None
+
+        # Inicjalizacja loggera
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("cinema4d_controller", log_to_file, log_file_path)
+
+    def reload_config(self):
+        """Przeładowuje konfigurację i aktualizuje logger"""
+        log_to_file, log_file_path = self.config.get_logging_settings()
+        self.logger = setup_logger("cinema4d_controller", log_to_file, log_file_path)
 
     def validate_cinema4d_path(self, version: str) -> List[str]:
         """Weryfikuje czy ścieżka do Cinema 4D jest poprawna"""
@@ -68,100 +76,143 @@ class Cinema4DController:
                     f"Nie znaleziono wersji Cinema 4D: {task.cinema4d_version}"
                 )
 
-            # Zamień Cinema 4D.exe na Commandline.exe
-            c4d_exe = c4d_exe.replace("Cinema 4D.exe", "Commandline.exe")
-            self.logger.info(f"Używam Cinema 4D z: {c4d_exe}")
-
-            # Budowanie komendy CLI zgodnie z dokumentacją
-            cmd = [c4d_exe, "-render", task.c4d_file_path, "-verbose", "-console"]
-
-            # Dodanie parametrów renderingu
-            if task.start_frame is not None and task.end_frame is not None:
-                cmd.extend(["-frame", f"{task.start_frame}-{task.end_frame}"])
-                self.logger.info(
-                    f"Renderowanie klatek: {task.start_frame}-{task.end_frame}"
-                )
-            elif task.start_frame is not None:
-                cmd.extend(["-frame", f"{task.start_frame}"])
-                self.logger.info(f"Renderowanie klatki: {task.start_frame}")
-
-            if task.output_folder:
-                cmd.extend(["-oimage", f'"{task.output_folder}"'])
-                self.logger.info(f"Folder wyjściowy: {task.output_folder}")
-
-            # Dodanie parametrów z render_settings
-            if task.render_settings.get("threads"):
-                cmd.extend(["-threads", str(task.render_settings["threads"])])
-                self.logger.info(f"Liczba wątków: {task.render_settings['threads']}")
-
-            if task.render_settings.get("shutdown"):
-                cmd.append("-shutdown")
-                self.logger.info("Włączono automatyczne wyłączenie po renderowaniu")
-
-            if task.render_settings.get("quit"):
-                cmd.append("-quit")
-                self.logger.info("Włączono automatyczne zamknięcie po renderowaniu")
-
             # Wykonanie renderowania
-            print(f"Rozpoczynam renderowanie: {' '.join(cmd)}")
+            cmd = [c4d_exe, "-render", task.c4d_file_path]
+
+            # Dodaj parametry z render_settings TYLKO jeśli zostały wybrane w UI
+            if (
+                task.render_settings.get("threads")
+                and task.render_settings["threads"] > 0
+            ):
+                cmd.extend(["-threads", str(task.render_settings["threads"])])
+            if (
+                task.render_settings.get("shutdown")
+                and task.render_settings["shutdown"]
+            ):
+                cmd.append("-shutdown")
+            if task.render_settings.get("quit") and task.render_settings["quit"]:
+                cmd.append("-quit")
+            if task.render_settings.get("use_gpu") and task.render_settings["use_gpu"]:
+                cmd.append("-gpu")
+            if task.render_settings.get("no_gui") and task.render_settings["no_gui"]:
+                cmd.append("cmd-nogui")
+            if (
+                task.render_settings.get("debug_mode")
+                and task.render_settings["debug_mode"]
+            ):
+                cmd.append("cmd-debug")
+            if (
+                task.render_settings.get("show_console")
+                and task.render_settings["show_console"]
+            ):
+                cmd.append("-console")
+            if (
+                task.render_settings.get("log_file")
+                and task.render_settings["log_file"]
+            ):
+                cmd.extend(["-log", task.render_settings["log_file"]])
+            if task.render_settings.get("verbose") and task.render_settings["verbose"]:
+                cmd.append("-verbose")
+            if (
+                task.render_settings.get("memory_limit")
+                and task.render_settings["memory_limit"] > 0
+            ):
+                cmd.extend(["cmd-memory", str(task.render_settings["memory_limit"])])
+            if (
+                task.render_settings.get("priority")
+                and task.render_settings["priority"]
+            ):
+                cmd.extend(["-priority", task.render_settings["priority"]])
+
+            # Dodaj wymagane parametry na końcu
+            cmd.extend(["-verbose", "-console"])
+
+            # Logowanie komendy
+            self.logger.info("=" * 80)
+            self.logger.info("KOMENDA RENDEROWANIA:")
+            self.logger.info(" ".join(cmd))
+            self.logger.info("=" * 80)
             start_time = time.time()
 
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-            )
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
 
-            # Czytanie wyjścia w czasie rzeczywistym
-            while True:
-                output = process.stdout.readline()
-                if output == "" and process.poll() is not None:
-                    break
-                if output:
-                    clean_output = output.strip()
-                    if clean_output.startswith("Cinema 4D: "):
-                        clean_output = clean_output[11:]  # Usuń prefix "Cinema 4D: "
-                    print(clean_output)  # Wyświetl w konsoli
-                    # Przekaż log do głównego okna
-                    if self.on_log_message:
-                        self.on_log_message(clean_output)
+                # Czytanie wyjścia w czasie rzeczywistym z timeoutem
+                while True:
+                    try:
+                        output = process.stdout.readline()
+                        if output == "" and process.poll() is not None:
+                            break
+                        if output:
+                            clean_output = output.strip()
+                            if clean_output.startswith("Cinema 4D: "):
+                                clean_output = clean_output[11:]
+                            self.logger.info(clean_output)
+                            if self.on_log_message:
+                                self.on_log_message(clean_output)
+                    except Exception as e:
+                        self.logger.error(f"Błąd podczas czytania wyjścia: {str(e)}")
+                        break
 
-            # Pobierz pozostałe wyjście
-            stdout, stderr = process.communicate()
-            if stdout:
-                for line in stdout.splitlines():
-                    clean_line = line.strip()
-                    if clean_line.startswith("Cinema 4D: "):
-                        clean_line = clean_line[11:]
-                    print(clean_line)
-                    if self.on_log_message:
-                        self.on_log_message(clean_line)
+                # Czekaj na zakończenie procesu z timeoutem
+                try:
+                    process.wait(timeout=300)  # 5 minut timeout
+                except subprocess.TimeoutExpired:
+                    self.logger.error("Timeout - proces przekroczył 5 minut")
+                    process.kill()
+                    task.error_message = "Timeout - proces przekroczył 5 minut"
+                    return False
 
-            # Logowanie błędów
-            if stderr:
-                for line in stderr.splitlines():
-                    print(f"BŁĄD: {line.strip()}")
-                    if self.on_log_message:
-                        self.on_log_message(f"BŁĄD: {line.strip()}")
+                # Pobierz pozostałe wyjście
+                stdout, stderr = process.communicate()
+                if stdout:
+                    for line in stdout.splitlines():
+                        clean_line = line.strip()
+                        if clean_line.startswith("Cinema 4D: "):
+                            clean_line = clean_line[11:]
+                        self.logger.info(clean_line)
+                        if self.on_log_message:
+                            self.on_log_message(clean_line)
 
-            end_time = time.time()
-            duration = end_time - start_time
-            print(f"Czas renderowania: {duration:.2f} sekund")
+                # Logowanie błędów
+                if stderr:
+                    for line in stderr.splitlines():
+                        error_msg = f"BŁĄD: {line.strip()}"
+                        self.logger.error(error_msg)
+                        if self.on_log_message:
+                            self.on_log_message(error_msg)
 
-            if process.returncode == 0:
-                print(f"Renderowanie zakończone pomyślnie: {task.name}")
-                return True
-            else:
-                error_msg = f"Błąd renderowania (kod {process.returncode}): {stderr}"
-                print(error_msg)
+                end_time = time.time()
+                duration = end_time - start_time
+                self.logger.info(f"Czas renderowania: {duration:.2f} sekund")
+
+                if process.returncode == 0:
+                    self.logger.info(f"Renderowanie zakończone pomyślnie: {task.name}")
+                    return True
+                else:
+                    error_msg = (
+                        f"Błąd renderowania (kod {process.returncode}): {stderr}"
+                    )
+                    self.logger.error(error_msg)
+                    task.error_message = error_msg
+                    return False
+
+            except Exception as e:
+                error_msg = f"Wyjątek podczas renderowania: {str(e)}"
+                self.logger.error(error_msg)
                 task.error_message = error_msg
                 return False
 
         except Exception as e:
             error_msg = f"Wyjątek podczas renderowania: {str(e)}"
-            print(error_msg)
+            self.logger.error(error_msg)
             task.error_message = error_msg
             return False
